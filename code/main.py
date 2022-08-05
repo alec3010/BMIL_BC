@@ -63,7 +63,7 @@ def general_config(cuda, algorithm, environment, model_setting):
 
     # Load information from the environment configuration yaml file
     with open(environment['config_path'], 'r') as f:
-        env_params = yaml.load(f)
+        env_params = yaml.full_load(f)
 
     try:
         env_parameters = list(filter(lambda x, environment=environment: x['env'] == environment['name'], env_params['tasks']))[0]

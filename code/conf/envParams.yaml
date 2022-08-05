@@ -1,7 +1,7 @@
 tasks:
-  - env: HalfCheetah-v2
-    expert_db: 'assets/HalfCheetah_expert_paths.pickle'
-    occlusion: [0,1,2,3,4,5,6,7]  # list of sensors "to be shown"
+  - env: HalfCheetah-v3
+    expert_db: 'assets/sac_demo_HalfCheetah-v2_final.pickle'
+    occlusion: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]  # list of sensors "to be shown"
     init_logstd: 0
 
   - env: Walker2d-v2
