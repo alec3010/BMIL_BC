@@ -255,7 +255,7 @@ def run_model(model, curr_memory, envs, device):
     curr_memory['curr_ob'] = torch.from_numpy(obs).float()
 
     # For start of a new episode, make the prev_ob same as the curr_ob
-    curr_memory['prev_ob'] = mask * curr_memory['prev_ob'] + (1 - mask) * curr_memory['curr_ob']
+    curr_memory['prev_ob'] = mask * curr_memory['prev_ob'].clone() + (1 - mask) * curr_memory['curr_ob']
     mask = mask.to(device)
 
     # Resets for new episodes
@@ -320,13 +320,13 @@ def track_rewards(tracked_rewards, mask, curr_memory, algorithm):
     mask = mask.cpu()
 
     # Track episode rewards and lengths
-    tracked_rewards['episode_lens'] += 1
-    tracked_rewards['num_ended_episodes'] += algorithm['num_processes'] - sum(mask)[0]
-    tracked_rewards['final_rewards'] *= mask
-    tracked_rewards['final_rewards'] += (1 - mask) * curr_memory['episode_reward_info']
-    tracked_rewards['final_lens'] *= mask
-    tracked_rewards['final_lens'] += (1 - mask) * tracked_rewards['episode_lens']
-    tracked_rewards['episode_lens'] *= mask
+    tracked_rewards['episode_lens'] = tracked_rewards['episode_lens'] + 1
+    tracked_rewards['num_ended_episodes'] = tracked_rewards['num_ended_episodes'] + algorithm['num_processes'] - sum(mask)[0]
+    tracked_rewards['final_rewards'] = tracked_rewards['final_rewards']*mask
+    tracked_rewards['final_rewards'] = tracked_rewards['final_rewards'] + (1 - mask) * curr_memory['episode_reward_info']
+    tracked_rewards['final_lens'] = tracked_rewards['final_lens'] * mask
+    tracked_rewards['final_lens'] = tracked_rewards['final_lens'] + (1 - mask) * tracked_rewards['episode_lens']
+    tracked_rewards['episode_lens'] = tracked_rewards['episode_lens']* mask
 
     return tracked_rewards['final_rewards'], tracked_rewards['final_lens'], tracked_rewards['num_ended_episodes']
 
@@ -370,7 +370,7 @@ def main(_run,
     # Count parameters
     num_parameters = 0
     for p in model.parameters():
-        num_parameters += p.nelement()
+        num_parameters = num_parameters + p.nelement()
 
     # Create optimisers. We have 2 optimizers:
     # 1. bp_optimizer: for parameters of the belief module and policy
@@ -398,6 +398,7 @@ def main(_run,
     running_paths = [None]*agent_bs
     start = time.time()
 
+    torch.autograd.set_detect_anomaly(True)
     # == Main training loop ==
     for j in range(num_updates):
 
@@ -420,11 +421,11 @@ def main(_run,
             ob_t = curr_memory['curr_ob']    # o_{t}
             ob_tm1 = curr_memory['prev_ob']   # o_{t-1}
             ac_tm1 = curr_memory['prev_ac']    # a_{t-1}
-
+            
             model_return, curr_memory, mask, reward = run_model(
-                model=model,
-                curr_memory=curr_memory,
-                envs=envs)
+                    model=model,
+                    curr_memory=curr_memory,
+                    envs=envs)
 
             if not disable_replay:
                 update_paths(agent_bs, ob_t, ob_tm1, ac_tm1, mask, running_paths, replay)
@@ -458,7 +459,7 @@ def main(_run,
         # Advantage calculation
         advantages = rollouts.advantages[1:].detach()
         if center_advantage:
-            advantages = (advantages - advantages[:, :agent_bs, ...].mean()) / (advantages[:, :agent_bs, ...].std() + 1e-6)
+            advantages = (advantages - advantages[:, :agent_bs, ...].clone().mean()) / (advantages[:, :agent_bs, ...].clone().std() + 1e-6)
 
         # "Soft" targets for adversarial loss
         discriminator_targets = torch.cat([torch.empty(num_steps, agent_bs).uniform_(0, 0.2),
@@ -468,23 +469,24 @@ def main(_run,
         # =======
         # Critic-loss
         value_loss = (v_target - values).pow(2)
-        value_loss = value_loss[:, :agent_bs, ...].mean()
+        value_loss = value_loss[:, :agent_bs, ...].clone().mean()
 
         # Actor-loss
         pg_loss = -(advantages * ac_log_probs)
-        pg_loss = pg_loss[:, :agent_bs, ...].mean()
+        pg_loss = pg_loss[:, :agent_bs, ...].clone().mean()
 
         # Entropy- and Belief-regularizations
-        dist_entropy = dist_entropy[:, :agent_bs, ...].mean()
-        reg_loss = reg_loss.mean()
+        dist_entropy = dist_entropy[:, :agent_bs, ...].clone().mean()
+        reg_loss = reg_loss.clone().mean()
+        #print(print(str(reg_loss)))
 
         # Discriminator loss
         discriminator_loss = adversarial_criterion(discriminator_sigmoids_d.squeeze(dim=2), discriminator_targets)
-        discriminator_loss = discriminator_loss[:, :agent_bs].mean() + discriminator_loss[:, agent_bs:].mean()
+        discriminator_loss = discriminator_loss[:, :agent_bs].clone().mean() + discriminator_loss[:, agent_bs:].clone().mean()
 
         # Adversarial loss for belief RNN
         adversarial_b_loss = adversarial_criterion(discriminator_sigmoids_b.squeeze(dim=2), discriminator_targets)
-        adversarial_b_loss = adversarial_b_loss[:, :agent_bs].mean() + adversarial_b_loss[:, agent_bs:].mean()
+        adversarial_b_loss = adversarial_b_loss[:, :agent_bs].clone().mean() + adversarial_b_loss[:, agent_bs:].clone().mean()
         # =======
 
         total_loss = (value_loss * loss_function['value_loss_coef']
@@ -497,13 +499,15 @@ def main(_run,
         retain_graph = j % algorithm['multiplier_backprop_length'] != 0
 
         bp_optimizer.zero_grad()
-        total_loss.backward(retain_graph=retain_graph)
+        
+        total_loss.backward(retain_graph=True)
 
         d_optimizer.zero_grad()
         discriminator_loss_ = discriminator_loss * loss_function['adversarial_loss_coef']
         discriminator_loss_.backward(retain_graph=False)
 
         if opt['max_grad_norm'] > 0:
+            
             nn.utils.clip_grad_norm_(model.parameters(), opt['max_grad_norm'])
 
         # Update parameters for all networks
@@ -556,19 +560,19 @@ def main(_run,
                     offPol_reg_loss.append(model_return.reg_loss)
                     tracked_values['reg_loss_scalar_offPol'].append(model_return.reg_loss_item) # used only for printing
 
-                offPol_reg_loss = torch.stack(tuple(offPol_reg_loss), dim=0).mean() * loss_function['reg_loss_coef']
+                offPol_reg_loss_ = torch.stack(tuple(offPol_reg_loss), dim=0).mean() * loss_function['reg_loss_coef']
 
                 # Only reset the (recurrent part of the) computation graph every 'multiplier_backprop_length' iterations
                 retain_offPol_graph = num_offPol_updates % algorithm['multiplier_backprop_length'] != 0
 
                 bp_optimizer.zero_grad()
-                offPol_reg_loss.backward(retain_graph=retain_offPol_graph)
+                offPol_reg_loss_.backward(retain_graph=retain_offPol_graph)
 
                 if opt['max_grad_norm'] > 0:
                     nn.utils.clip_grad_norm_(model.parameters(), opt['max_grad_norm'])
 
                 bp_optimizer.step()
-                num_offPol_updates += 1
+                num_offPol_updates = num_offPol_updates + 1
 
                 if not retain_offPol_graph:
                     curr_memory_offPol['prev_belief'] = curr_memory_offPol['prev_belief'].detach()

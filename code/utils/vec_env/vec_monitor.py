@@ -16,8 +16,8 @@ class VecMonitor(VecEnvWrapper):
 
     def step_wait(self):
         obs, rews, dones, infos = self.venv.step_wait()
-        self.eprets += rews
-        self.eplens += 1
+        self.eprets = self.eprets + rews
+        self.eplens = self.eplens + 1
         newinfos = []
         for (i, (done, ret, eplen, info)) in enumerate(zip(dones, self.eprets, self.eplens, infos)):
             info = info.copy()
