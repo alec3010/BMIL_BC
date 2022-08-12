@@ -4,7 +4,7 @@ import numpy as np
 import gym
 from gym.spaces.box import Box
 
-from baselines import bench
+from stable_baselines3.common.monitor import Monitor
 from expert_envs import ExpertEnv
 
 BIG = 1e6
@@ -18,7 +18,7 @@ def make_env(env_id, seed, rank, log_dir, occlusion, sensor_noise):
 
         if log_dir is not None:
             print("Create Monitor in {}".format(log_dir))
-            env = bench.Monitor(env, os.path.join(log_dir, str(rank)))
+            env = Monitor(env, os.path.join(log_dir, str(rank)))
 
         if sensor_noise > 0:
             # wrapper to add noise to observations
@@ -67,7 +67,7 @@ class WrapPyTorch(gym.ObservationWrapper):
             [obs_shape[2], obs_shape[1], obs_shape[0]]
         )
 
-    def _observation(self, observation):
+    def observation(self, observation):
         return observation.transpose(2, 0, 1)
 
 class NoisyWrapper(gym.ObservationWrapper):
@@ -79,7 +79,7 @@ class NoisyWrapper(gym.ObservationWrapper):
         self.p = 0.9
         self.delta = .5
 
-    def _observation(self, observation):
+    def observation(self, observation):
         if np.random.binomial(1, self.p, 1).item():
             observation_perturbed = np.random.uniform(low=observation*(1-self.delta), high=observation*(1+self.delta), size=observation.shape)
             return observation_perturbed
@@ -106,15 +106,15 @@ class OccludeWrapper(gym.ObservationWrapper):
         if len(sensor_idx) > obsdim:
             raise ValueError("Length of sensor mask ({0}) cannot be greater than observation dim ({1})".format(len(sensor_idx), obsdim))
         if len(sensor_idx) == obsdim and not np.any(np.array(sensor_idx) > 1):
-            sensor_mask = np.array(sensor_idx, dtype=np.bool)
+            sensor_mask = np.array(sensor_idx, dtype=bool)
         elif np.any(np.unique(sensor_idx, return_counts=True)[1] > 1):
             raise ValueError("Double entries or boolean mask with dim ({0}) < observation dim ({1})".format(len(sensor_idx), obsdim))
         else:
-            sensor_mask = np.zeros((obsdim,), dtype=np.bool)
+            sensor_mask = np.zeros((obsdim,), dtype=bool)
             sensor_mask[sensor_idx] = 1
         self._sensor_mask = sensor_mask
 
-    def _observation(self, observation):
+    def observation(self, observation):
         return self.occlude(observation)
 
     def occlude(self, observation):

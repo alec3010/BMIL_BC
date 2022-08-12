@@ -6,7 +6,7 @@ from multiprocessing import Pipe, Array, Process
 import numpy as np
 from . import VecEnv, CloudpickleWrapper
 import ctypes
-from baselines import logger
+from stable_baselines3.common import logger
 
 from .util import dict_to_obs, obs_space_info, obs_to_dict
 
@@ -14,7 +14,7 @@ _NP_TO_CT = {np.float32: ctypes.c_float,
              np.int32: ctypes.c_int32,
              np.int8: ctypes.c_int8,
              np.uint8: ctypes.c_char,
-             np.bool: ctypes.c_bool}
+             bool: ctypes.c_bool}
 
 
 class ShmemVecEnv(VecEnv):

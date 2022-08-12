@@ -220,11 +220,18 @@ class BMIL(nn.Module):
         """
 
         encoded_ac = self.action_encoder(prev_ac)
+
         x = self.obs_encoder(ob)
-        x = torch.cat([x, encoded_ac], dim=1)
+        x = torch.cat([x.clone(), encoded_ac], dim=1)
+        # print("size of unencoded observation: " + str(ob.size()))
+        # print("size of x: " + str(x.size()))
+        # print("size of previous action: " + str(prev_ac.size()))
+        # print("size of encoded action: " + str(encoded_ac.size()))
 
         # Update belief
+        
         belief_state = self.belief_gru(x, prev_belief_state)
+        # print("size of belief state: " + str(belief_state.size()))
 
         # Prediction losses
         fwd_1step_loss = bwd_1step_loss = ac_1step_loss = \
@@ -233,18 +240,20 @@ class BMIL(nn.Module):
 
         # Task-agnostic belief learning uses 1-step forward prediction
         if self.belief_loss_type == 'task_agnostic' or self.belief_regularization:
-
-            # 1-step forward prediction.
+            pass
+            #1-step forward prediction.
             obs_predicted = self.decoder_fwd_1step(
                 torch.cat([
                     prev_belief_state,
                     encoded_ac
                 ], dim=1))
             fwd_1step_loss = l2_loss_criterion(obs_predicted, ob)
+            #print(str(fwd_1step_loss.size()))
 
         # In addition to 1-step forward prediction, the belief is regularized with
         # k-step forward, {1,k}-step backward & {1,k}-step action predictions
         if self.belief_regularization:
+            
 
             # 1-step backward prediction.
             obs_predicted = self.decoder_bwd_1step(
@@ -306,12 +315,14 @@ class BMIL(nn.Module):
 
         # loss accumulation
         reg_loss = (
-                fwd_1step_loss
+                 fwd_1step_loss
                 + fwd_kstep_loss
                 + bwd_1step_loss
                 + bwd_kstep_loss
                 + ac_1step_loss
                 + ac_kstep_loss)
+        
+                
 
         return belief_state, reg_loss, torch.mean(reg_loss).item()
 
@@ -322,12 +333,17 @@ class BMIL(nn.Module):
 
         normalized_ob = self._normalize(curr_memory['curr_ob'], update_rms=True)
         normalized_prev_ob = self._normalize(curr_memory['prev_ob'], update_rms=False)
+        # print("observation size: " + str(normalized_ob.size()))
+        # print("previous observation size: " + str(normalized_prev_ob.size()))
+        # print("previous action size: " + str(curr_memory['prev_ac'].size()))
+        # print("previous belief state size: " + str(curr_memory['prev_belief'].size()))
+
 
         belief_state, reg_loss, reg_loss_item = self._encode(
-                ob=normalized_ob,
-                prev_ob=normalized_prev_ob,
+                ob=normalized_ob.detach(),
+                prev_ob=normalized_prev_ob.detach(),
                 prev_ac=curr_memory['prev_ac'].detach(),
-                prev_belief_state=curr_memory['prev_belief'],
+                prev_belief_state=curr_memory['prev_belief'].detach(),
                 ob_tpk=None, future_k_acs=None,    # Currently, k-step losses are computed only with off-policy data in forward_offPol()
                 future_mask=None, ob_tmkm1=None,
                 past_k_acs=None, past_mask=None)
@@ -351,12 +367,15 @@ class BMIL(nn.Module):
 
         discriminator_acs = self.discriminator_ac_encoder(model_return.action.detach())
         discriminator_in = torch.cat([encoded_state.detach(), normalized_ob, discriminator_acs], dim=1)
+        
         model_return.discriminator_out_d = self.discriminator_network(discriminator_in)
+        
 
         # discriminator_out_d stores the discriminator output for computing the gradient for discriminator, whereas
         # discriminator_out_b stores the discriminator output for computing the gradient for the belief RNN
         discriminator_in = torch.cat([encoded_state, normalized_ob, discriminator_acs.detach()], dim=1)
         model_return.discriminator_out_b = self.discriminator_network(discriminator_in)
+        
 
         model_return.ac_log_probs, model_return.dist_entropy = self.action_dist.logprobs_and_entropy(actor_state, action.detach())
         return model_return
@@ -372,8 +391,8 @@ class BMIL(nn.Module):
         belief_state, reg_loss, reg_loss_item = self._encode(
                 ob=normalized_ob,
                 prev_ob=normalized_prev_ob,
-                prev_ac=curr_memory_offPol['prev_ac'].to(self.device),
-                prev_belief_state=curr_memory_offPol['prev_belief'],
+                prev_ac=curr_memory_offPol['prev_ac'].to(self.device).detach(),
+                prev_belief_state=curr_memory_offPol['prev_belief'].detach(),
                 ob_tpk=normalized_ob_tpk,
                 future_k_acs=curr_memory_offPol['future_k_acs'].to(self.device),
                 future_mask=curr_memory_offPol['future_mask'].to(self.device),
